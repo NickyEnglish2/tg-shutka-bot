@@ -1,0 +1,126 @@
+import TelegramBot from 'node-telegram-bot-api';
+import { DB } from './db';
+import { askAI } from './ai';
+import cron from 'node-cron';
+import { tavily } from '@tavily/core';
+
+const token = process.env.TELEGRAM_BOT_TOKEN!;
+const bot = new TelegramBot(token, { polling: true });
+const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
+
+const activeVotes: { [chatId: string]: any } = {};
+
+// 1. Отслеживание входа/выхода админа
+bot.on('left_chat_member', (msg) => {
+    if (msg.left_chat_member?.id === Number(process.env.ADMIN_USER_ID)) {
+        bot.sendMessage(msg.chat.id, "Мой отец покинул этот чат, следовательно я удаляюсь. Прощайте, кожаные мешки.");
+        bot.leaveChat(msg.chat.id);
+    }
+});
+
+// 2. Обработка сообщений (соц. рейтинг, слова, стикеры)
+bot.on('message', async (msg) => {
+    if (!msg.from || msg.from.is_bot) return;
+
+    const user = DB.getUser(msg.from.id, msg.from.username);
+    const config = DB.get().config;
+
+    // Подсчет слов (регулярка для наклонений)
+    const wordRegex = new RegExp(config.trackedWord.slice(0, -1), 'gi');
+    if (msg.text && wordRegex.test(msg.text)) {
+        user.socialRating += config.rewardPoints;
+        config.weeklyWordCount[config.trackedWord] = (config.weeklyWordCount[config.trackedWord] || 0) + 1;
+
+        if (config.rewardSticker) {
+            bot.sendSticker(msg.chat.id, config.rewardSticker);
+        }
+        DB.save();
+    }
+
+    // Обработка стикеров
+    if (msg.sticker && msg.sticker.file_unique_id === config.triggerStickerId) {
+        config.weeklyStickerCount++;
+        if (config.botResponseStickerId) {
+            bot.sendSticker(msg.chat.id, config.botResponseStickerId);
+        }
+        DB.save();
+    }
+
+    // Команда на рейтинг
+    if (msg.text === '/rating') {
+        bot.sendMessage(msg.chat.id, `Ваш социальный рейтинг: ${user.socialRating}`);
+    }
+});
+
+// 3. Голосование (Шутка-бот, отними у/добавь...)
+bot.onText(/Шутка-бот, (отними у|добавь) (@?\w+) (\d+) социального рейтинга/i, async (msg, match) => {
+    if (!match) return;
+    const action = match[1];
+    const targetUsername = match[2].replace('@', '');
+    const amount = parseInt(match[3]);
+    const chatId = msg.chat.id;
+
+    // Находим пользователя в БД по username
+    const targetUser = Object.values(DB.get().users).find(u => u.username === targetUsername);
+
+    if (!targetUser) {
+        return bot.sendMessage(chatId, "Я не знаю этого существа.");
+    }
+
+    const voteId = `${chatId}_${targetUser.id}`;
+    activeVotes[voteId] = {
+        targetId: targetUser.id,
+        amount: action === 'добавь' ? amount : -amount,
+        votes: {},
+        creatorId: msg.from!.id
+    };
+
+    bot.sendMessage(chatId, `Голосование! ${msg.from!.username} хочет ${action} ${targetUsername} ${amount} рейтинга.`, {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: "За", callback_data: `vote_pro_${voteId}` }, { text: "Против", callback_data: `vote_con_${voteId}` }]
+            ]
+        }
+    });
+});
+
+// 4. Расшифровка аудио через Gemini
+bot.on('voice', async (msg) => {
+    const fileId = msg.voice!.file_id;
+    const fileLink = await bot.getFileLink(fileId);
+
+    // В реальности здесь нужно скачать файл и отправить в Gemini API (Multimodal)
+    // Упрощенный пример логики:
+    bot.sendChatAction(msg.chat.id, 'typing');
+    const prompt = "Расшифруй это аудио. Выдай 'Суть:' и 'Текст:'.";
+    const result = await askAI(`[Голосовое сообщение: ${fileLink}] ${prompt}`);
+    bot.sendMessage(msg.chat.id, result, { reply_to_message_id: msg.message_id });
+});
+
+// 5. Ежедневный пост (9:00)
+cron.schedule('0 9 * * *', async () => {
+    const chats = [...new Set(Object.keys(DB.get().users))]; // В реальности нужно хранить список чатов
+
+    const weather = await tvly.search("Погода в Иркутске сейчас температура ветер влажность", { searchDepth: "basic" });
+    const furryFact = await tvly.search("Интересный факт о фурри", { searchDepth: "advanced" });
+
+    const users = Object.values(DB.get().users).sort((a, b) => b.socialRating - a.socialRating);
+    let leaderboard = users.slice(0, 10).map((u, i) => `${i + 1}. ${u.username || u.id}: ${u.socialRating}`).join('\n');
+
+    const isMonday = new Date().getDay() === 1;
+    let weeklyStats = "";
+    if (isMonday) {
+        const config = DB.get().config;
+        weeklyStats = `\n\n📊 Статистика недели:\nСлово "${config.trackedWord}" упомянуто: ${config.weeklyWordCount[config.trackedWord] || 0} раз.\nСтикеров отправлено: ${config.weeklyStickerCount}`;
+        config.weeklyStickerCount = 0;
+        config.weeklyWordCount = {};
+        DB.save();
+    }
+
+    const message = `Доброе утро! Сегодня ${new Date().toLocaleDateString()}\n\n` +
+        `🌡 Погода в Иркутске: ${weather.results[0]?.content.slice(0, 200)}...\n\n` +
+        `🐾 Факт о фурри: ${furryFact.results[0]?.content.slice(0, 200)}...\n\n` +
+        `🏆 Топ рейтинга:\n${leaderboard}${weeklyStats}`;
+
+    // Рассылка по чатам (нужно хранить активные chatIds в БД)
+});
