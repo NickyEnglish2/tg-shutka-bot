@@ -1,0 +1,37 @@
+name: Deploy Joke Bot
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install dependencies and Build
+        run: |
+          npm install
+          npm run build
+
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}     # IP твоего сервера
+          username: ${{ secrets.SERVER_USER }} # root или другой юзер
+          key: ${{ secrets.SSH_PRIVATE_KEY }}  # SSH ключ (не пароль!)
+          script: |
+            cd /var/www/tg-shutka-bot               # Путь к боту на сервере
+            git pull origin master
+            npm install
+            npm run build
+            pm2 restart tg-shutka-bot || pm2 start dist/bot.js --name "tg-shutka-bot"
