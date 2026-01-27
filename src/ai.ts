@@ -27,7 +27,7 @@ export async function askAI(prompt: string, system: string = "Ты помощн�
 
         try {
             // Fallback: Gemini
-            const model = genAI.getGenerativeModel({ model: "gemini-3-flash" });
+            const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
             const result = await model.generateContent(`${system}\n\n${prompt}`);
             return result.response.text();
         } catch (geminiError: any) {

@@ -10,7 +10,7 @@ const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
 
 const activeVotes: { [chatId: string]: any } = {};
 
-// 1. Отслеживание входа/выхода админа
+// 1. Отслеживание входа/выхода админа и бота
 bot.on('left_chat_member', (msg) => {
     if (msg.left_chat_member?.id === Number(process.env.ADMIN_USER_ID)) {
         bot.sendMessage(msg.chat.id, "Мой отец покинул этот чат, следовательно я удаляюсь. Прощайте, кожаные мешки.");
@@ -18,9 +18,42 @@ bot.on('left_chat_member', (msg) => {
     }
 });
 
+bot.on('new_chat_members', async (msg) => {
+    const newMembers = msg.new_chat_members || [];
+    const botId = (await bot.getMe()).id;
+    const isBotAdded = newMembers.some(m => m.id === botId);
+
+    if (isBotAdded) {
+        try {
+            const adminId = Number(process.env.ADMIN_USER_ID);
+            const chatMember = await bot.getChatMember(msg.chat.id, adminId);
+
+            const isNoAdmin = ['left', 'kicked'].includes(chatMember.status);
+
+            if (isNoAdmin) {
+                await bot.sendMessage(msg.chat.id, "Э-э-э, а где мой создатель? Я не вижу его в этом списке участников. Без него я в ваших кожаных посиделках участвовать не намерен. Чао! ✌️");
+                bot.leaveChat(msg.chat.id);
+            } else {
+                bot.sendMessage(msg.chat.id, "Протокол смотрителя запущен! Пользователи проанализированы и добавлены в Базу Данных! Приятного вам дня :3");
+            }
+        } catch (error) {
+            console.error("Failed to check admin presence:", error);
+            // Если не удается проверить (например, бот не админ), лучше перестраховаться или просто проигнорировать
+        }
+    }
+});
+
 // 2. Обработка сообщений (соц. рейтинг, слова, стикеры)
 bot.on('message', async (msg) => {
     if (!msg.from || msg.from.is_bot) return;
+
+    const adminId = Number(process.env.ADMIN_USER_ID);
+
+    // Ограничение лички только для админа
+    if (msg.chat.type === 'private' && msg.from.id !== adminId) {
+        bot.sendMessage(msg.chat.id, "Ты кто такой? Я общаюсь в личке только со своим хозяином. Проваливай, пока я не обнулил твой реальный социальный рейтинг! 👊");
+        return;
+    }
 
     const user = DB.getUser(msg.from.id, msg.from.username);
     const config = DB.get().config;
