@@ -1,0 +1,43 @@
+{
+  "name": "tg-shutka-bot",
+  "version": "1.0.0",
+  "description": "Небольшой бот, которого я собрал для нашего личного чата. Использует для некоторых запросов ИИ.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node dist/bot.js",
+    "build": "tsc",
+    "dev": "nodemon src/bot.ts",
+    "lint": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NickyEnglish2/tg-shutka-bot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/NickyEnglish2/tg-shutka-bot/issues"
+  },
+  "homepage": "https://github.com/NickyEnglish2/tg-shutka-bot#readme",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@tavily/core": "^0.7.1",
+    "axios": "^1.13.3",
+    "dotenv": "^17.2.3",
+    "lodash": "^4.17.23",
+    "node-cron": "^4.2.1",
+    "node-telegram-bot-api": "^0.67.0",
+    "openai": "^6.16.0"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.23",
+    "@types/node": "^25.0.10",
+    "@types/node-cron": "^3.0.11",
+    "@types/node-telegram-bot-api": "^0.64.13",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
