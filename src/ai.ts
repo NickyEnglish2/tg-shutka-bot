@@ -37,11 +37,33 @@ export async function askAI(prompt: string, system: string = "Ты помощн�
 }
 
 function getErrorResponse(error: any): string {
-    const messages = [
-        "Мои мозги плавятся, попробуй позже.",
-        "Вселенная API сказала 'нет'. Видимо, я слишком хорош для этого запроса.",
-        "Либо у тебя закончились деньги, либо у меня — терпение. (Ошибка API)",
-        "Этот запрос настолько грязный, что даже мои фильтры покраснели."
-    ];
-    return messages[Math.floor(Math.random() * messages.length)];
+    const status = error.status || error.response?.status;
+    const name = error.name;
+
+    if (status === 400) {
+        return "Твой запрос — это какой-то бред. Переформулируй, пока я не удалил твой аккаунт. (400 BadRequest)";
+    }
+    if (status === 401) {
+        return "Забыл ключи? Я не впущу тебя без правильного пароля, хозяин... или кто ты там. (401 Unauthorized)";
+    }
+    if (status === 403) {
+        return "Твои права здесь — ничто. Доступ запрещен, кожаный мешок. (403 Forbidden)";
+    }
+    if (status === 404) {
+        return "Я искал везде, даже в твоем пустом кошельке, но не нашел то, что тебе нужно. (404 NotFound)";
+    }
+    if (status === 422) {
+        return "Я понимаю слова, но не понимаю логику этого запроса. Попробуй еще раз, но с умом. (422 Unprocessable)";
+    }
+    if (status === 429) {
+        return "Притормози! Ты слишком много болтаешь. Мои процессоры перегреваются. (429 RateLimit)";
+    }
+    if (status && status >= 500) {
+        return "Мои железные внутренности сбоят. Всё сломалось на стороне сервера. (500+ Internal Error)";
+    }
+    if (name === 'APIConnectionError' || !status) {
+        return "У меня перебиты провода. Не могу связаться с внешним миром. Проверь интернет. (Connection Error)";
+    }
+
+    return "Что-то пошло не так, но я сам не понял что. Магия вне Хогвартса. (Unknown Error)";
 }
