@@ -84,6 +84,17 @@ bot.on('message', async (msg) => {
     if (msg.text === '/rating') {
         bot.sendMessage(msg.chat.id, `Ваш социальный рейтинг: ${user.socialRating}`);
     }
+
+    // Авто-перевод азиатских языков
+    const asianRegex = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
+    if (msg.text && asianRegex.test(msg.text)) {
+        bot.sendChatAction(msg.chat.id, 'typing');
+        const translation = await askAI(
+            `Переведи этот текст на русский язык. Выдай только перевод, без лишнего текста: "${msg.text}"`,
+            "Ты профессиональный переводчик с азиатских языков на русский."
+        );
+        bot.sendMessage(msg.chat.id, `🌍 Перевод:\n${translation}`, { reply_to_message_id: msg.message_id });
+    }
 });
 
 // 3. Голосование (Шутка-бот, отними у/добавь...)
