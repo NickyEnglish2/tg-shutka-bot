@@ -3,12 +3,13 @@ import { DB } from './db';
 import { askAI } from './ai';
 import cron from 'node-cron';
 import { tavily } from '@tavily/core';
+import { Vote } from './types';
 
 const token = process.env.TELEGRAM_BOT_TOKEN!;
 const bot = new TelegramBot(token, { polling: true });
 const tvly = tavily({ apiKey: process.env.TAVILY_API_KEY });
 
-const activeVotes: { [chatId: string]: any } = {};
+const activeVotes: { [voteId: string]: Vote } = {};
 
 // 1. Отслеживание входа/выхода админа и бота
 bot.on('left_chat_member', (msg) => {
@@ -101,23 +102,78 @@ bot.onText(/Шутка-бот, (отними у|добавь) (@?\w+) (\d+) со
     }
 
     const voteId = `${chatId}_${targetUser.id}`;
+    if (activeVotes[voteId]) {
+        return bot.sendMessage(chatId, "Голосование по этому пользователю уже идет.");
+    }
+
     activeVotes[voteId] = {
         targetId: targetUser.id,
+        targetUsername,
         amount: action === 'добавь' ? amount : -amount,
         votes: {},
-        creatorId: msg.from!.id
+        creatorId: msg.from!.id,
+        chatId
     };
 
-    bot.sendMessage(chatId, `Голосование! ${msg.from!.username} хочет ${action} ${targetUsername} ${amount} рейтинга.`, {
+    bot.sendMessage(chatId, `🗳 Голосование начато! ${msg.from!.username} хочет ${action} ${targetUsername} ${amount} рейтинга.\nУ вас есть 10 минут. Требуется 2/3 голосов участников чата "За".`, {
         reply_markup: {
             inline_keyboard: [
                 [{ text: "За", callback_data: `vote_pro_${voteId}` }, { text: "Против", callback_data: `vote_con_${voteId}` }]
             ]
         }
     });
+
+    // Таймер на 10 минут
+    setTimeout(async () => {
+        if (!activeVotes[voteId]) return;
+
+        const vote = activeVotes[voteId];
+        try {
+            const chatMemberCount = await bot.getChatMemberCount(vote.chatId);
+            const threshold = Math.ceil((chatMemberCount * 2) / 3);
+
+            const pros = Object.values(vote.votes).filter(v => v === true).length;
+
+            if (pros >= threshold) {
+                const user = DB.getUser(vote.targetId, vote.targetUsername);
+                user.socialRating += vote.amount;
+                DB.save();
+                bot.sendMessage(vote.chatId, `✅ Предложение принято! Социальный рейтинг ${vote.targetUsername} ${vote.amount > 0 ? 'увеличен' : 'уменьшен'} на ${Math.abs(vote.amount)}. (Голосов "За": ${pros}/${threshold})`);
+            } else {
+                bot.sendMessage(vote.chatId, `❌ Предложение отклонено. Не набрано достаточное количество голосов "За" (нужно ${threshold}, набрано: ${pros}).`);
+            }
+        } catch (error) {
+            console.error("Error finishing vote:", error);
+        } finally {
+            delete activeVotes[voteId];
+        }
+    }, 10 * 60 * 1000);
 });
 
-// 4. Расшифровка аудио через Gemini
+// 4. Обработка голосов
+bot.on('callback_query', async (callbackQuery) => {
+    const data = callbackQuery.data;
+    if (!data || !data.startsWith('vote_')) return;
+
+    const parts = data.split('_');
+    const type = parts[1]; // pro or con
+    const voteId = parts.slice(2).join('_');
+
+    const vote = activeVotes[voteId];
+    if (!vote) {
+        return bot.answerCallbackQuery(callbackQuery.id, { text: "Голосование уже окончено.", show_alert: true });
+    }
+
+    const userId = callbackQuery.from.id;
+    if (vote.votes[userId] !== undefined) {
+        return bot.answerCallbackQuery(callbackQuery.id, { text: "Вы уже проголосовали!", show_alert: true });
+    }
+
+    vote.votes[userId] = (type === 'pro');
+    bot.answerCallbackQuery(callbackQuery.id, { text: `Ваш голос "${type === 'pro' ? 'За' : 'Против'}" учтен!` });
+});
+
+// 5. Расшифровка аудио через Gemini
 bot.on('voice', async (msg) => {
     const fileId = msg.voice!.file_id;
     const fileLink = await bot.getFileLink(fileId);

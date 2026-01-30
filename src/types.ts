@@ -7,9 +7,11 @@ export interface UserData {
 
 export interface Vote {
     targetId: number;
+    targetUsername: string;
     amount: number;
     votes: { [userId: number]: boolean }; // true - за, false - против
     creatorId: number;
+    chatId: number;
 }
 
 export interface BotConfig {
